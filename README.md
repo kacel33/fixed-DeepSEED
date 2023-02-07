@@ -1,3 +1,11 @@
+Here's the link to the original DeepSEED repository.  
+https://github.com/ymli39/DeepSEED-3D-ConvNets-for-Pulmonary-Nodule-Detection 
+
+There were a few mistakes in the original DeepSEED code, but they've been taken care of in this repository.  
+1. The paper results were not reproduced in the original DeepSEED code, but a bug fix made it possible.
+2. Fixed an issue with memory during the validation process.
+3. Corrected the way arguments were functioning.
+
 # DeepSEED-3D-ConvNets-for-Pulmonary-Nodule-Detection
 DeepSEED: 3D Squeeze-and-Excitation Encoder-Decoder ConvNets for Pulmonary Nodule Detection
 
