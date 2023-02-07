@@ -19,13 +19,15 @@ from torch import optim
 from torch.autograd import Variable
 from config_training import config as config_training
 
-from layers import acc
+from layers_se import acc
+from tqdm import tqdm
+import pkbar
 
 parser = argparse.ArgumentParser(description='PyTorch DataBowl3 Detector')
 parser.add_argument('--model', '-m', metavar='MODEL', default='res18_se',
                     help='model')
-parser.add_argument('-j', '--workers', default=32, type=int, metavar='N',
-                    help='number of data loading workers (default: 32)')
+parser.add_argument('-j', '--workers', default=24, type=int, metavar='N',
+                    help='number of data loading workers (default: 24)')
 parser.add_argument('--epochs', default=250, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
@@ -40,11 +42,11 @@ parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 parser.add_argument('--save-freq', default='10', type=int, metavar='S',
                     help='save frequency')
-parser.add_argument('--resume', default='177.ckpt', type=str, metavar='PATH',
+parser.add_argument('--resume', default='None', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('--save-dir', default='test_results/se_focal_fold6/', type=str, metavar='SAVE',
                     help='directory to save checkpoint (default: none)')
-parser.add_argument('--test', default=1, type=int, metavar='TEST',
+parser.add_argument('--test', default=0, type=int, metavar='TEST',
                     help='1 do test evaluation, 0 not')
 parser.add_argument('--split', default=8, type=int, metavar='SPLIT',
                     help='In the test phase, split the image to 8 parts')
@@ -68,7 +70,7 @@ def main():
     start_epoch = args.start_epoch
     save_dir = args.save_dir
     
-    if args.resume:
+    if args.resume != 'None':
         print("=> loading checkpoint '{}'".format(args.resume))
         checkpoint = torch.load(save_dir + 'detector_' + args.resume)
         start_epoch = checkpoint['epoch']
@@ -120,7 +122,7 @@ def main():
     train_loader = DataLoader(dataset, batch_size = args.batch_size, shuffle = True, num_workers = args.workers, pin_memory=True)
 
     dataset = LungNodule3Ddetector(datadir, luna_test, config, phase = 'val')
-    val_loader = DataLoader(dataset, batch_size = 16, shuffle = False, num_workers = args.workers, pin_memory=True)
+    val_loader = DataLoader(dataset, batch_size = args.batch_size, shuffle = False, num_workers = args.workers, pin_memory=True)
 
     optimizer = torch.optim.SGD( net.parameters(), args.lr, momentum = 0.9, weight_decay = args.weight_decay)
     
@@ -158,7 +160,8 @@ def main():
 
 def train(data_loader, net, loss, epoch, optimizer, get_lr, save_dir):
     start_time = time.time()
-    
+    kbar = pkbar.Kbar(target=len(data_loader), epoch=epoch, num_epochs=args.epochs, width=8, always_stateful=False)
+
     net.train()
     lr = get_lr(epoch)
     for param_group in optimizer.param_groups:
@@ -166,9 +169,9 @@ def train(data_loader, net, loss, epoch, optimizer, get_lr, save_dir):
 
     metrics = []
     for i, (data, target, coord) in enumerate(data_loader):
-        data = Variable(data.cuda(async = True))
-        target = Variable(target.cuda(async = True))
-        coord = Variable(coord.cuda(async = True))
+        data = Variable(data.cuda(non_blocking = True))
+        target = Variable(target.cuda(non_blocking = True))
+        coord = Variable(coord.cuda(non_blocking = True))
 
         output = net(data, coord)
         
@@ -177,10 +180,14 @@ def train(data_loader, net, loss, epoch, optimizer, get_lr, save_dir):
         loss_output[0].backward()
         optimizer.step()
 
-        loss_output[0] = loss_output[0].item()
+        for cnt_loss in range(len(loss_output)):
+            try:
+                loss_output[cnt_loss] = loss_output[cnt_loss].item()
+            except:
+                pass
         metrics.append(loss_output)
-        
-        print("finished iteration {} with loss {}.".format(i, loss_output[0]))
+        kbar.update(i, values=[("loss", loss_output[0])])
+        #print("finished iteration {} with loss {}.".format(i, loss_output[0]))
                 
     end_time = time.time()
 
@@ -208,14 +215,19 @@ def validate(data_loader, net, loss):
 
     metrics = []
     for i, (data, target, coord) in enumerate(data_loader):
-        data = Variable(data.cuda(async = True))
-        target = Variable(target.cuda(async = True))
-        coord = Variable(coord.cuda(async = True))
+        data = Variable(data.cuda(non_blocking = True))
+        target = Variable(target.cuda(non_blocking = True))
+        coord = Variable(coord.cuda(non_blocking = True))
 
-        output = net(data, coord)
+        with torch.no_grad():
+            output = net(data, coord)
         loss_output = loss(output, target, train = False)
 
-        loss_output[0] = loss_output[0].item()
+        for cnt_loss in range(len(loss_output)):
+            try:
+                loss_output[cnt_loss] = loss_output[cnt_loss]
+            except:
+                pass
         metrics.append(loss_output)    
     end_time = time.time()
 
@@ -251,7 +263,7 @@ def test(data_loader, net, get_pbb, save_dir, config):
         target = [np.asarray(t, np.float32) for t in target]
         lbb = target[0]
         nzhw = nzhw[0]
-        name = data_loader.dataset.filenames[i_name].split('-')[0].split('/')[-1].split('_clean')[0]
+        name = data_loader.dataset.filenames[i_name].split('-')[-1].split('/')[-1].split('_clean')[0]
         data = data[0][0]
         coord = coord[0][0]
         isfeat = False
@@ -268,8 +280,8 @@ def test(data_loader, net, get_pbb, save_dir, config):
         featurelist = []
 
         for i in range(len(splitlist)-1):
-            input = Variable(data[splitlist[i]:splitlist[i+1]].cuda(async = True))
-            inputcoord = Variable(coord[splitlist[i]:splitlist[i+1]].cuda(async = True))
+            input = Variable(data[splitlist[i]:splitlist[i+1]].cuda(non_blocking = True))
+            inputcoord = Variable(coord[splitlist[i]:splitlist[i+1]].cuda(non_blocking = True))
             if isfeat:
                 output,feature = net(input,inputcoord)
                 featurelist.append(feature.data.cpu().numpy())
@@ -307,7 +319,7 @@ def singletest(data,net,config,splitfun,combinefun,n_per_run,margin = 64,isfeat=
     z, h, w = data.size(2), data.size(3), data.size(4)
     print(data.size())
     data = splitfun(data,config['max_stride'],margin)
-    data = Variable(data.cuda(async = True), requires_grad=False)
+    data = Variable(data.cuda(non_blocking = True), requires_grad=False)
     splitlist = range(0,args.split+1,n_per_run)
     outputlist = []
     featurelist = []

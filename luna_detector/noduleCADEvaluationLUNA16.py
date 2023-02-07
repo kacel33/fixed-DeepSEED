@@ -389,8 +389,8 @@ def evaluateCAD(seriesUIDs, results_filename, outputDir, allNodules, CADSystemNa
             nxth *= 2
         if abs(nxth - 16) < 1e-5: break
     print(frvvlu/7, nxth)
-#    print(sens_itp[fps_itp==0.125], sens_itp[fps_itp==0.25], sens_itp[fps_itp==0.5], sens_itp[fps_itp==1], sens_itp[fps_itp==2]\
-#        ,sens_itp[fps_itp==4],sens_itp[fps_itp==8])
+    print(sens_itp[fps_itp==0.125], sens_itp[fps_itp==0.25], sens_itp[fps_itp==0.5], sens_itp[fps_itp==1], sens_itp[fps_itp==2]\
+        ,sens_itp[fps_itp==4],sens_itp[fps_itp==8])
     
     if performBootstrapping:
         # Write mean, lower, and upper bound curves to disk
@@ -429,7 +429,7 @@ def evaluateCAD(seriesUIDs, results_filename, outputDir, allNodules, CADSystemNa
         plt.title('FROC performance - %s' % (CADSystemName))
         
         if bLogPlot:
-            plt.xscale('log', basex=2)
+            plt.xscale('log', base=2)
             ax.xaxis.set_major_formatter(FixedFormatter([0.125,0.25,0.5,1,2,4,8]))
         
         # set your ticks manually
