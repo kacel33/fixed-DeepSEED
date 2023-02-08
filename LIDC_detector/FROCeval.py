@@ -8,17 +8,17 @@ import SimpleITK as sitk
 from config_testing import config
 from layers import nms
 
-annotations_filename = './labels/new_nodule.csv'
-annotations_excluded_filename = './labels/new_non_nodule.csv'# path for excluded annotations for the fold
-seriesuids_filename = './labels/LIDCTestID.csv'# path for seriesuid for the fold
-datapath = config['LIDC_data']
-sideinfopath = '/data/LunaProj/LIDC/processed/'
+annotations_filename = 'labels/annos.csv'
+annotations_excluded_filename = 'labels/excluded.csv'# path for excluded annotations for the fold
+seriesuids_filename = 'labels/LIDCTestID.csv'# path for seriesuid for the fold
+datapath = config['luna_data']
+sideinfopath = '/media/do/새 볼륨/DeepSEED-save/LUNA16/lunaprep/'
 nmsthresh = 0.1
 
-bboxpath = './test_results/baseline_se_focal_newparam/bbox/' #for baseline
-frocpath = './test_results/baseline_se_focal_newparam/bbox/nms' + str(nmsthresh) + '/' #_focal
+bboxpath = 'test_results/regular-dose-original-DeepSEED-with-SE/bbox/' #for baseline
+frocpath = 'test_results/regular-dose-original-DeepSEED-with-SE/bbox/nms' + str(nmsthresh) + '/' #_focal
 
-outputdir = './bboxoutput/se_focal/nms' + str(nmsthresh) + '/'
+outputdir = 'test_results/result' + str(nmsthresh) + '/'
 
 #detp = [0.3, 0.4, 0.5, 0.6, 0.7]
 detp = [0.3]

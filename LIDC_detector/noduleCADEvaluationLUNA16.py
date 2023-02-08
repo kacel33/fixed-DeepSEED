@@ -14,10 +14,12 @@ from NoduleFinding import NoduleFinding
 from tools import csvTools
 # matplotlib.rc('xtick', labelsize=18) 
 # matplotlib.rc('ytick', labelsize=18) 
+'''
 font = {'family' : 'normal',
         'size'   : 17}
 
 matplotlib.rc('font', **font)
+'''
 # Evaluation settings
 bPerformBootstrapping = True
 bNumberOfBootstrapSamples = 1000

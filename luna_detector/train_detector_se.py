@@ -17,6 +17,7 @@ from torch.backends import cudnn
 from torch.utils.data import DataLoader
 from torch import optim
 from torch.autograd import Variable
+from torch.utils.tensorboard import SummaryWriter
 from config_training import config as config_training
 
 from layers_se import acc
@@ -54,6 +55,7 @@ parser.add_argument('--gpu', default='all', type=str, metavar='N',
                     help='use gpu')
 parser.add_argument('--n_test', default=8, type=int, metavar='N',
                     help='number of gpu for test')
+parser.add_argument('--savename', default='', type=str, help='tensorboard is saved with savename')
 
 def main():
     global args
@@ -70,6 +72,7 @@ def main():
     start_epoch = args.start_epoch
     save_dir = args.save_dir
     
+    writer = SummaryWriter(args.savename)
     if args.resume != 'None':
         print("=> loading checkpoint '{}'".format(args.resume))
         checkpoint = torch.load(save_dir + 'detector_' + args.resume)
@@ -120,6 +123,8 @@ def main():
 
     dataset = LungNodule3Ddetector(datadir, luna_train, config, phase = 'train')
     train_loader = DataLoader(dataset, batch_size = args.batch_size, shuffle = True, num_workers = args.workers, pin_memory=True)
+    
+    add_tensorboard_graph(writer, net, dataset[0], config)
 
     dataset = LungNodule3Ddetector(datadir, luna_test, config, phase = 'val')
     val_loader = DataLoader(dataset, batch_size = args.batch_size, shuffle = False, num_workers = args.workers, pin_memory=True)
@@ -139,9 +144,10 @@ def main():
     
 
     for epoch in range(start_epoch, args.epochs + 1):
-        train(train_loader, net, loss, epoch, optimizer, get_lr, save_dir)
+        kbar = pkbar.Kbar(target=len(train_loader), epoch=epoch, num_epochs=args.epochs, width=8, always_stateful=False)
+        train(train_loader, net, loss, epoch, optimizer, get_lr, save_dir, kbar, writer)
         print("finsihed epoch {}".format(epoch))
-        valiloss = validate(val_loader, net, loss)
+        valiloss = validate(val_loader, net, loss, epoch, kbar, writer)
         
         if bestLoss > valiloss:   
             bestLoss = valiloss
@@ -156,11 +162,10 @@ def main():
                 'args': args},
                 os.path.join(save_dir, 'detector_%03d.ckpt' % epoch))
             print("save model on epoch %d" % epoch)
-          
+    writer.close()
 
-def train(data_loader, net, loss, epoch, optimizer, get_lr, save_dir):
+def train(data_loader, net, loss, epoch, optimizer, get_lr, save_dir, kbar, writer):
     start_time = time.time()
-    kbar = pkbar.Kbar(target=len(data_loader), epoch=epoch, num_epochs=args.epochs, width=8, always_stateful=False)
 
     net.train()
     lr = get_lr(epoch)
@@ -186,9 +191,8 @@ def train(data_loader, net, loss, epoch, optimizer, get_lr, save_dir):
             except:
                 pass
         metrics.append(loss_output)
-        kbar.update(i, values=[("loss", loss_output[0])])
-        #print("finished iteration {} with loss {}.".format(i, loss_output[0]))
-                
+        kbar.update(i, values=[("train total loss", loss_output[0])])
+        #print("finished iteration {} with loss {}.".format(i, loss_output[0]))              
     end_time = time.time()
 
     metrics = np.asarray(metrics, np.float32)
@@ -206,29 +210,31 @@ def train(data_loader, net, loss, epoch, optimizer, get_lr, save_dir):
         np.mean(metrics[:, 3]),
         np.mean(metrics[:, 4]),
         np.mean(metrics[:, 5])))
+    add_tensorboard_loss(writer, metrics, epoch) 
 
 
-def validate(data_loader, net, loss):
+def validate(data_loader, net, loss, epoch, kbar, writer):
     start_time = time.time()
     
     net.eval()
 
     metrics = []
-    for i, (data, target, coord) in enumerate(data_loader):
-        data = Variable(data.cuda(non_blocking = True))
-        target = Variable(target.cuda(non_blocking = True))
-        coord = Variable(coord.cuda(non_blocking = True))
+    with torch.no_grad():
+        for i, (data, target, coord) in enumerate(data_loader):
+            data = Variable(data.cuda(non_blocking = True))
+            target = Variable(target.cuda(non_blocking = True))
+            coord = Variable(coord.cuda(non_blocking = True))
 
-        with torch.no_grad():
             output = net(data, coord)
-        loss_output = loss(output, target, train = False)
+            loss_output = loss(output, target, train = False)
 
-        for cnt_loss in range(len(loss_output)):
-            try:
-                loss_output[cnt_loss] = loss_output[cnt_loss]
-            except:
-                pass
-        metrics.append(loss_output)    
+            for cnt_loss in range(len(loss_output)):
+                try:
+                    loss_output[cnt_loss] = loss_output[cnt_loss].item()
+                except:
+                    pass
+            metrics.append(loss_output)
+    kbar.add(1, values=[('val_loss', loss_output[0])])    
     end_time = time.time()
 
     metrics = np.asarray(metrics, np.float32)
@@ -245,6 +251,7 @@ def validate(data_loader, net, loss):
         np.mean(metrics[:, 3]),
         np.mean(metrics[:, 4]),
         np.mean(metrics[:, 5])))
+    add_tensorboard_loss(writer, metrics, epoch, mode='val') 
     return np.mean(metrics[:, 0])
 
 
@@ -258,56 +265,56 @@ def test(data_loader, net, get_pbb, save_dir, config):
     net.eval()
     namelist = []
     split_comber = data_loader.dataset.split_comber
-    
-    for i_name, (data, target, coord, nzhw) in enumerate(data_loader):
-        target = [np.asarray(t, np.float32) for t in target]
-        lbb = target[0]
-        nzhw = nzhw[0]
-        name = data_loader.dataset.filenames[i_name].split('-')[-1].split('/')[-1].split('_clean')[0]
-        data = data[0][0]
-        coord = coord[0][0]
-        isfeat = False
-        if 'output_feature' in config:
-            if config['output_feature']:
-                isfeat = True
-        n_per_run = args.n_test
-        print(data.size())
-        
-        splitlist = list(range(0,len(data)+1,n_per_run))
-        if splitlist[-1]!=len(data):
-            splitlist.append(len(data))
-        outputlist = []
-        featurelist = []
+    with torch.no_grad():
+        for i_name, (data, target, coord, nzhw) in enumerate(data_loader):
+            target = [np.asarray(t, np.float32) for t in target]
+            lbb = target[0]
+            nzhw = nzhw[0]
+            name = data_loader.dataset.filenames[i_name].split('-')[-1].split('/')[-1].split('_clean')[0]
+            data = data[0][0]
+            coord = coord[0][0]
+            isfeat = False
+            if 'output_feature' in config:
+                if config['output_feature']:
+                    isfeat = True
+            n_per_run = args.n_test
+            print(data.size())
+            
+            splitlist = list(range(0,len(data)+1,n_per_run))
+            if splitlist[-1]!=len(data):
+                splitlist.append(len(data))
+            outputlist = []
+            featurelist = []
 
-        for i in range(len(splitlist)-1):
-            input = Variable(data[splitlist[i]:splitlist[i+1]].cuda(non_blocking = True))
-            inputcoord = Variable(coord[splitlist[i]:splitlist[i+1]].cuda(non_blocking = True))
+            for i in range(len(splitlist)-1):
+                input = Variable(data[splitlist[i]:splitlist[i+1]].cuda(non_blocking = True))
+                inputcoord = Variable(coord[splitlist[i]:splitlist[i+1]].cuda(non_blocking = True))
+                if isfeat:
+                    output,feature = net(input,inputcoord)
+                    featurelist.append(feature.data.cpu().numpy())
+                else:
+                    output = net(input,inputcoord)
+                outputlist.append(output.data.cpu().numpy())
+                del input, inputcoord, output
+                torch.cuda.empty_cache()
+            
+            output = np.concatenate(outputlist,0)
+            output = split_comber.combine(output,nzhw=nzhw)
             if isfeat:
-                output,feature = net(input,inputcoord)
-                featurelist.append(feature.data.cpu().numpy())
-            else:
-                output = net(input,inputcoord)
-            outputlist.append(output.data.cpu().numpy())
-            del input, inputcoord, output
-            torch.cuda.empty_cache()
-        
-        output = np.concatenate(outputlist,0)
-        output = split_comber.combine(output,nzhw=nzhw)
-        if isfeat:
-            feature = np.concatenate(featurelist,0).transpose([0,2,3,4,1])[:,:,:,:,:,np.newaxis]
-            feature = split_comber.combine(feature,sidelen)[...,0]
+                feature = np.concatenate(featurelist,0).transpose([0,2,3,4,1])[:,:,:,:,:,np.newaxis]
+                feature = split_comber.combine(feature,sidelen)[...,0]
 
-        thresh = -3
-        pbb,mask = get_pbb(output,thresh,ismask=True)
-        if isfeat:
-            feature_selected = feature[mask[0],mask[1],mask[2]]
-            np.save(os.path.join(save_dir, name+'_feature.npy'), feature_selected)
-        #tp,fp,fn,_ = acc(pbb,lbb,0,0.1,0.1)
-        #print([len(tp),len(fp),len(fn)])
-        print([i_name,name])
+            thresh = -3
+            pbb,mask = get_pbb(output,thresh,ismask=True)
+            if isfeat:
+                feature_selected = feature[mask[0],mask[1],mask[2]]
+                np.save(os.path.join(save_dir, name+'_feature.npy'), feature_selected)
+            #tp,fp,fn,_ = acc(pbb,lbb,0,0.1,0.1)
+            #print([len(tp),len(fp),len(fn)])
+            print([i_name,name])
 
-        np.save(os.path.join(save_dir, name+'_pbb.npy'), pbb)
-        np.save(os.path.join(save_dir, name+'_lbb.npy'), lbb)
+            np.save(os.path.join(save_dir, name+'_pbb.npy'), pbb)
+            np.save(os.path.join(save_dir, name+'_lbb.npy'), lbb)
     np.save(os.path.join(save_dir, 'namelist.npy'), namelist)
     end_time = time.time()
 
@@ -318,28 +325,29 @@ def test(data_loader, net, get_pbb, save_dir, config):
 def singletest(data,net,config,splitfun,combinefun,n_per_run,margin = 64,isfeat=False):
     z, h, w = data.size(2), data.size(3), data.size(4)
     print(data.size())
-    data = splitfun(data,config['max_stride'],margin)
-    data = Variable(data.cuda(non_blocking = True), requires_grad=False)
-    splitlist = range(0,args.split+1,n_per_run)
-    outputlist = []
-    featurelist = []
-    for i in range(len(splitlist)-1):
+    with torch.no_grad():
+        data = splitfun(data,config['max_stride'],margin)
+        data = Variable(data.cuda(non_blocking = True), requires_grad=False)
+        splitlist = range(0,args.split+1,n_per_run)
+        outputlist = []
+        featurelist = []
+        for i in range(len(splitlist)-1):
+            if isfeat:
+                output,feature = net(data[splitlist[i]:splitlist[i+1]])
+                featurelist.append(feature)
+            else:
+                output = net(data[splitlist[i]:splitlist[i+1]])
+            output = output.data.cpu().numpy()
+            outputlist.append(output)
+            
+        output = np.concatenate(outputlist,0)
+        output = combinefun(output, z / config['stride'], h / config['stride'], w / config['stride'])
         if isfeat:
-            output,feature = net(data[splitlist[i]:splitlist[i+1]])
-            featurelist.append(feature)
+            feature = np.concatenate(featurelist,0).transpose([0,2,3,4,1])
+            feature = combinefun(feature, z / config['stride'], h / config['stride'], w / config['stride'])
+            return output,feature
         else:
-            output = net(data[splitlist[i]:splitlist[i+1]])
-        output = output.data.cpu().numpy()
-        outputlist.append(output)
-        
-    output = np.concatenate(outputlist,0)
-    output = combinefun(output, z / config['stride'], h / config['stride'], w / config['stride'])
-    if isfeat:
-        feature = np.concatenate(featurelist,0).transpose([0,2,3,4,1])
-        feature = combinefun(feature, z / config['stride'], h / config['stride'], w / config['stride'])
-        return output,feature
-    else:
-        return output
+            return output
 if __name__ == '__main__':
     main()
 

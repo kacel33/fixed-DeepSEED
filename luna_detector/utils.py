@@ -5,8 +5,39 @@ import torch
 import csv
 import os.path
 import csv
+from torch.utils.tensorboard import SummaryWriter
 
 #%%
+
+def add_tensorboard_graph(writer, net, sample_dataset, config):
+    sample = sample_dataset
+    sample_input = sample[0]
+    sample_input = sample_input.view(1, 1, config['crop_size'][0], config['crop_size'][1], config['crop_size'][2])
+    sample_coord = torch.from_numpy(sample[2])
+    sample_coord = sample_coord.view(1, sample_coord.shape[0], sample_coord.shape[1], sample_coord.shape[2], sample_coord.shape[3])
+    writer.add_graph(net, input_to_model=(sample_input, sample_coord))
+    return 
+
+def add_tensorboard_loss(writer, metrics, epoch, mode='train'):
+    total_loss = np.mean(metrics[:, 0])
+    classify_loss = np.mean(metrics[:, 1])
+    x_regress_loss = np.mean(metrics[:, 2])
+    y_regress_loss = np.mean(metrics[:, 3])
+    z_regress_loss = np.mean(metrics[:, 4])
+    r_regress_loss = np.mean(metrics[:, 5]) 
+
+    regress_loss = x_regress_loss + y_regress_loss + z_regress_loss + r_regress_loss
+    tpr = 100.0 * np.sum(metrics[:, 6]) / np.sum(metrics[:, 7])
+    tnr = 100.0 * np.sum(metrics[:, 8]) / np.sum(metrics[:, 9])
+
+    writer.add_scalar(mode + ' total loss', total_loss, epoch)
+    writer.add_scalar(mode + ' classify loss', classify_loss, epoch)
+    writer.add_scalar(mode + ' regress loss', regress_loss, epoch)
+    writer.add_scalar(mode + ' tpr', tpr, epoch)
+    writer.add_scalar(mode + ' tnr', tnr, epoch) 
+    return
+
+
 def getFreeId():
     import pynvml 
 

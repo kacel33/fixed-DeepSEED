@@ -116,7 +116,7 @@ def getfroc(detp):
         
 if __name__ == '__main__':
     p = Pool(nprocess)
-    getcsv(detp)
+    #getcsv(detp)
     
     getfroc(detp)
     p.close()

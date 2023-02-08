@@ -104,7 +104,7 @@ class LungNodule3Ddetector(Dataset):
                 isScale = self.augtype['scale'] and (self.phase=='train')
                 sample, target, bboxes, coord = self.crop(imgs, [], bboxes,isScale=False,isRand=True)
             label = self.label_mapping(sample.shape[1:], target, bboxes)
-            sample = (sample.astype(np.float32)-128)/128
+            sample = (sample.astype(np.float32))/255
             return torch.from_numpy(sample), torch.from_numpy(label), coord
         else:
             imgs = np.load(self.filenames[idx])
@@ -125,7 +125,7 @@ class LungNodule3Ddetector(Dataset):
                                                    max_stride = int(self.split_comber.max_stride/self.stride),
                                                    margin = int(self.split_comber.margin/self.stride))
             assert np.all(nzhw==nzhw2)
-            imgs = (imgs.astype(np.float32)-128)/128
+            imgs = (imgs.astype(np.float32))/255
             return torch.from_numpy(imgs), bboxes, torch.from_numpy(coord2), np.array(nzhw)
 
     def __len__(self):
